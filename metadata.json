@@ -1,0 +1,6 @@
+{
+  "name": "Eve: Cybernetic Companion",
+  "description": "A high-fidelity mechanical companion with a cyberpunk aesthetic and real-time neural link.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
