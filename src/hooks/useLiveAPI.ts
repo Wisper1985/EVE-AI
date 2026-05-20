@@ -132,7 +132,7 @@ export function useLiveAPI(config: LiveAPIConfig) {
   const sendAudio = useCallback((base64Data: string) => {
     if (sessionRef.current && isConnected) {
       sessionRef.current.sendRealtimeInput({
-        media: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
+        audio: { data: base64Data, mimeType: 'audio/pcm;rate=16000' }
       });
     }
   }, [isConnected]);
@@ -140,7 +140,7 @@ export function useLiveAPI(config: LiveAPIConfig) {
   const sendVideo = useCallback((base64Data: string) => {
     if (sessionRef.current && isConnected) {
       sessionRef.current.sendRealtimeInput({
-        media: { data: base64Data, mimeType: 'image/jpeg' }
+        video: { data: base64Data, mimeType: 'image/jpeg' }
       });
     }
   }, [isConnected]);
