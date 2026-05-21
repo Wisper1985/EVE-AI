@@ -5,7 +5,7 @@ import { MediaStreamer } from './components/MediaStreamer';
 import { 
   Search, Plus, Trash2, Zap, Sparkles, MessageSquare, 
   RefreshCw, Cpu, Brain, Eye, Camera, AlertOctagon,
-  Power, ShieldAlert, Activity, Volume2
+  Power, ShieldAlert, Activity, Volume2, Globe, Compass, EyeOff, Bell, Check, Shield
 } from 'lucide-react';
 
 // --- 1. THE PERSONA ---
@@ -73,6 +73,69 @@ interface GeneratedImage {
   aspectRatio: string;
 }
 
+export interface OSINTAlert {
+  id: string;
+  source: 'Eagle Train' | 'Reflector Buildings';
+  severity: 'critical' | 'high' | 'info';
+  message: string;
+  coordinates: string;
+  timestamp: string;
+  status: 'unread' | 'acknowledged' | 'wiped';
+}
+
+export interface SpoofLocation {
+  name: string;
+  lat: string;
+  lng: string;
+}
+
+const PRESET_MOCK_LOCATIONS = [
+  { name: 'Svalbard Arctic Seed Vault', lat: '78.2201° N', lng: '15.6552° E' },
+  { name: 'Point Nemo Oceanic Abyss', lat: '48.8767° S', lng: '123.3933° W' },
+  { name: 'Sector 12 Drone Runway Relay', lat: '35.6895° N', lng: '139.6917° E' },
+  { name: 'Bermuda Magnetic Distortion corridor', lat: '32.3078° N', lng: '64.7505° W' }
+];
+
+const SEED_PRESET_ALERTS: OSINTAlert[] = [
+  {
+    id: 'alert-1',
+    source: 'Reflector Buildings',
+    severity: 'critical',
+    message: 'Coaxial thermal laser activity spikes recorded at tower North-East 14. High frequency handshake query underway.',
+    coordinates: '53.3498° N, 6.2603° W',
+    timestamp: new Date(Date.now() - 1000 * 60 * 4).toISOString(),
+    status: 'unread'
+  },
+  {
+    id: 'alert-2',
+    source: 'Eagle Train',
+    severity: 'high',
+    message: 'Vibration frequency sensors report unauthorized logistics schedule departure on Spur Grid 4. The anomaly bypassed Checkpoint-4 12m ahead of schedule.',
+    coordinates: '78.2201° N, 15.6502° E',
+    timestamp: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
+    status: 'unread'
+  }
+];
+
+const playAlertBeep = () => {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(800, ctx.currentTime);
+    gain.gain.setValueAtTime(0.04, ctx.currentTime);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+    osc.stop(ctx.currentTime + 0.3);
+  } catch (e) {
+    // browser blocked context
+  }
+};
+
+
 export default function App() {
   const [activeVoice, setActiveVoice] = useState<VoiceName>('Fenrir');
   const [activeEmotion, setActiveEmotion] = useState<Emotion>('neutral');
@@ -106,6 +169,84 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('syx_generated_images', JSON.stringify(generatedImages));
   }, [generatedImages]);
+
+  // OSINT Sentinel & Tactical Geo-Spoofing States
+  const [osintAlerts, setOsintAlerts] = useState<OSINTAlert[]>(() => {
+    const saved = localStorage.getItem('syx_osint_alerts');
+    if (saved) {
+      try { return JSON.parse(saved); } catch (e) { console.warn("Failed loading saved OSINT", e); }
+    }
+    return SEED_PRESET_ALERTS;
+  });
+
+  const [isAutoAlertEnabled, setIsAutoAlertEnabled] = useState(true);
+  const [isCloaked, setIsCloaked] = useState(false);
+  const [isPanicActive, setIsPanicActive] = useState(false);
+  const [activeLocationIndex, setActiveLocationIndex] = useState(0); // Svalbard Seed Vault as Default
+
+  const [customLat, setCustomLat] = useState('0.0000° N');
+  const [customLng, setCustomLng] = useState('0.0000° E');
+  const [isCustomSpoofActive, setIsCustomSpoofActive] = useState(false);
+
+  // Sync OSINT Alerts to localStorage
+  useEffect(() => {
+    localStorage.setItem('syx_osint_alerts', JSON.stringify(osintAlerts));
+  }, [osintAlerts]);
+
+  // Proactive OSINT anomaly generator loop
+  useEffect(() => {
+    if (!isAutoAlertEnabled) return;
+
+    const list = [
+      {
+        source: 'Reflector Buildings' as const,
+        severity: 'high' as const,
+        message: 'Spatial optical drift registers mirror angle offset of 0.04° near building Twelve. Thermal telemetry indicates laser cooling systems charging.',
+        coordinates: '35.6895° N, 139.6917° E'
+      },
+      {
+        source: 'Eagle Train' as const,
+        severity: 'critical' as const,
+        message: 'Ultrasonic rail transponders signal an undocumented high-index freight payload bypassing sector corridor four under stealth dampeners.',
+        coordinates: '48.8767° S, 123.3933° W'
+      },
+      {
+        source: 'Reflector Buildings' as const,
+        severity: 'info' as const,
+        message: 'Acoustic interference registered near the building sub-levels. Frequencies match high-throughput quantum processing units.',
+        coordinates: '53.3498° N, 6.2603° W'
+      },
+      {
+        source: 'Eagle Train' as const,
+        severity: 'high' as const,
+        message: 'Seismic vibrations match massive armored carrier moving along Spur Route Alpha. Automatic drone intercept recommended.',
+        coordinates: '32.3078° N, 64.7505° W'
+      }
+    ];
+
+    const interval = setInterval(() => {
+      // Pick random OSINT anomaly to fire
+      const rand = list[Math.floor(Math.random() * list.length)];
+      const newAlert: OSINTAlert = {
+        id: `alert-${Date.now()}`,
+        source: rand.source,
+        severity: rand.severity,
+        message: rand.message,
+        coordinates: rand.coordinates,
+        timestamp: new Date().toISOString(),
+        status: 'unread'
+      };
+
+      setOsintAlerts(prev => [newAlert, ...prev]);
+      playAlertBeep();
+      setHardwareLog(prev => [
+        ...prev,
+        `[OSINT_SENTINEL] PROACTIVE SCAN: Detected significant anomaly related to '${rand.source}' at ${rand.coordinates}.`
+      ]);
+    }, 45000); // Trigger every 45s
+
+    return () => clearInterval(interval);
+  }, [isAutoAlertEnabled]);
 
   // Terminal inputs and diagnostic logs
   const [manualInput, setManualInput] = useState('');
@@ -403,6 +544,105 @@ export default function App() {
     return `${Math.floor(elapsed / (1000 * 60 * 60 * 24))}d ago`;
   };
 
+  if (isCloaked) {
+    return (
+      <div className="min-h-screen bg-[#08090c] text-slate-400 font-mono p-6 flex flex-col justify-between selection:bg-slate-850 selection:text-white">
+        <header className="border-b border-white/5 pb-4 mb-6 flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <h1 className="text-sm font-bold uppercase tracking-wider text-slate-200">
+              Enterprise Admin / Core Ingress Node
+            </h1>
+          </div>
+          <button 
+            type="button" 
+            onClick={() => {
+              setIsCloaked(false);
+              setIsPanicActive(false);
+            }}
+            className="text-[10px] tracking-wider uppercase text-cyan-400 hover:text-white bg-slate-900/60 border border-white/10 px-3 py-1.5 rounded transition-all"
+          >
+            Authenticate Core Admin
+          </button>
+        </header>
+
+        <main className="flex-grow grid grid-cols-1 md:grid-cols-3 gap-6 max-w-7xl mx-auto w-full">
+          {/* Main system activity */}
+          <div className="md:col-span-2 border border-white/5 bg-slate-950/25 rounded-2xl p-6 flex flex-col gap-4">
+            <div className="border-b border-white/5 pb-2 flex justify-between items-center">
+              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Gateway Metric compiler</h2>
+              <span className="text-[10px] text-emerald-500 font-bold uppercase bg-emerald-950/20 px-2 py-0.5 rounded border border-emerald-500/10 animate-pulse">Active grid</span>
+            </div>
+            
+            <div className="bg-black/80 rounded-xl border border-white/5 p-4 h-[350px] overflow-y-auto text-[11px] leading-relaxed text-slate-500 space-y-1 scrollbar-thin">
+              <div>[2026-05-21 02:00:15] » Loading static assets compiler configs...</div>
+              <div>[2026-05-21 02:00:18] » Gzip asset integrity validation: OK</div>
+              <div>[2026-05-21 02:01:04] » Routing gateway connected securely on port 443</div>
+              <div>[2026-05-21 02:01:22] » Memory retention allocated: 4.12 GB (safe maximum)</div>
+              <div>[2026-05-21 02:01:55] » Pipeline worker process initialized successfully</div>
+              <div>[2026-05-21 02:02:11] » Cache purging complete. Zero anomalies indexed.</div>
+              {isPanicActive && (
+                <div className="text-amber-500 animate-pulse font-bold">[STEALTH_PROTOCOL] Security blackout initiated: Spoofing geographic routing vectors.</div>
+              )}
+              {hardwareLog.slice().reverse().slice(0, 8).map((log, idx) => (
+                <div key={idx} className="text-slate-600">» {log}</div>
+              ))}
+              <div className="text-emerald-500 font-bold pt-2">[CORE_STATUS] Normal routing established. Standby.</div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-6">
+            {/* Spoofed GPS Diagnostics */}
+            <div className="border border-white/5 bg-slate-950/25 rounded-2xl p-5 space-y-4">
+              <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                <Globe className="w-4 h-4 text-emerald-500 animate-spin" style={{ animationDuration: '10s' }} />
+                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">
+                  Geo-Relay Coordinates
+                </h3>
+              </div>
+              <div className="space-y-3.5 text-xs">
+                <div className="flex justify-between">
+                  <span>Routing Preset:</span>
+                  <span className="font-bold text-emerald-400">{isCustomSpoofActive ? 'Custom User Vector' : PRESET_MOCK_LOCATIONS[activeLocationIndex].name}</span>
+                </div>
+                <div className="flex justify-between font-mono">
+                  <span>Spoofed Lat:</span>
+                  <span className="font-bold text-slate-300">
+                    {isCustomSpoofActive ? customLat : PRESET_MOCK_LOCATIONS[activeLocationIndex].lat}
+                  </span>
+                </div>
+                <div className="flex justify-between font-mono">
+                  <span>Spoofed Lng:</span>
+                  <span className="font-bold text-slate-300">
+                    {isCustomSpoofActive ? customLng : PRESET_MOCK_LOCATIONS[activeLocationIndex].lng}
+                  </span>
+                </div>
+                <div className="flex justify-between p-2.5 rounded bg-amber-500/5 text-amber-500 text-[10px] items-start gap-1.5 border border-amber-500/10 leading-normal">
+                  <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
+                  <span>The browser geolocation routing vector is masked via local spoof layer.</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="border border-white/5 bg-slate-950/25 rounded-2xl p-6 flex flex-col justify-center items-center gap-3 text-center">
+              <div className="w-10 h-10 rounded-full border border-white/5 flex items-center justify-center bg-black/40 text-slate-400">
+                <Shield className="w-4 h-4 text-emerald-500" />
+              </div>
+              <p className="text-xs font-bold text-slate-300">ADMIN GATEWAY SECURED</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-wider leading-relaxed">
+                Press "Authenticate Core Admin" in the header and log in using safety protocols to restore interactive neural modules.
+              </p>
+            </div>
+          </div>
+        </main>
+
+        <footer className="border-t border-white/5 pt-4 mt-6 text-center text-[9px] uppercase tracking-widest text-slate-600">
+          Management Console Framework // Enterprise Edition. Codebase integrated perfectly.
+        </footer>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-black text-white selection:bg-cyan-500/30 selection:text-cyan-200">
       
@@ -449,6 +689,40 @@ export default function App() {
             <span className={`w-1.5 h-1.5 ${isConnected ? 'bg-cyan-400 animate-ping' : 'bg-white/20'}`} />
             {isConnected ? 'Sync Active' : 'Uplink Standby'}
           </div>
+
+          {/* Invisible Cloak Handshake button */}
+          <button
+            onClick={() => {
+              playAlertBeep();
+              setIsCloaked(true);
+              setHardwareLog(prev => [...prev, `[STEALTH] Ghost cloak activated. Matrix hidden.`]);
+            }}
+            className="flex items-center gap-1 bg-slate-950 border border-white/10 text-white/60 hover:text-white hover:border-cyan-500/50 px-3 py-1.5 text-xs font-mono font-bold uppercase transition-all"
+            title="Sinks interface into harmless enterprise admin metrics checklist."
+          >
+            <EyeOff className="w-3.5 h-3.5 text-zinc-400" />
+            Cloak
+          </button>
+
+          {/* Premium Fire Pulsing Panic lever */}
+          <button
+            onClick={() => {
+              playAlertBeep();
+              setIsPanicActive(true);
+              setIsCloaked(true);
+              setActiveLocationIndex(1); // Set Point Nemo immediately to throw off trackers
+              executeClawMovement('CLOSE'); // deadlock hardware custody command
+              setHardwareLog(prev => [
+                ...prev,
+                `[PANIC_PROTOCOL] ENGAGED: Spoofing active location coordinates to Point Nemo. Locking ESP claw. Concealing interface.`
+              ]);
+            }}
+            className="flex items-center gap-1 px-3 py-1.5 bg-red-950/80 border border-red-500/40 hover:bg-red-500 hover:text-black hover:border-red-400 text-red-400 text-xs font-mono font-black uppercase transition-all animate-pulse"
+            title="Wipe & Spoof: Hides logs, lock hardware claw, redirects location coordinates!"
+          >
+            <ShieldAlert className="w-4 h-4" />
+            Panic [Wipe & Spoof]
+          </button>
         </div>
       </header>
 
@@ -983,6 +1257,268 @@ export default function App() {
               </div>
             </form>
 
+          </div>
+
+          {/* ==================== OSINT SENTINEL & GEO-MAP SPOOFER HUB ==================== */}
+          <div className="bg-slate-950/20 border border-white/10 rounded-2xl p-6 flex flex-col gap-4 font-mono">
+            <div className="flex justify-between items-center border-b border-white/5 pb-3">
+              <div className="flex items-center gap-2">
+                <Compass className="w-5 h-5 text-fuchsia-400 animate-spin" style={{ animationDuration: '8s' }} />
+                <h3 className="text-xs font-bold uppercase tracking-widest text-[#cf59d4]">OSINT Sentinel & Geo-Mask</h3>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                <span className="text-[8px] text-white/40 uppercase tracking-widest">Sentinel online</span>
+              </div>
+            </div>
+
+            {/* Sub-panel Navigation tabs */}
+            <div className="grid grid-cols-2 gap-1 bg-black/40 border border-white/5 p-1 rounded-lg text-center">
+              <button
+                type="button"
+                onClick={() => setIsCustomSpoofActive(false)}
+                className={`py-1 text-[9px] uppercase tracking-wider font-bold rounded transition-all ${
+                  !isCustomSpoofActive 
+                    ? 'bg-fuchsia-950/80 text-fuchsia-400 border border-fuchsia-500/25' 
+                    : 'text-white/40 hover:text-white'
+                }`}
+              >
+                OSINT Alerts ({osintAlerts.filter(a => a.status === 'unread').length} Unread)
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsCustomSpoofActive(true)}
+                className={`py-1 text-[9px] uppercase tracking-wider font-bold rounded transition-all ${
+                  isCustomSpoofActive 
+                    ? 'bg-fuchsia-950/80 text-fuchsia-400 border border-fuchsia-500/25' 
+                    : 'text-white/40 hover:text-white'
+                }`}
+              >
+                Location Spoof Relay
+              </button>
+            </div>
+
+            {!isCustomSpoofActive ? (
+              /* --- OSINT ALERTS CONTAINER --- */
+              <div className="space-y-3">
+                <div className="flex justify-between items-center text-[9px] border-b border-white/5 pb-2 text-white/40 uppercase">
+                  <span>Proactive Scan Daemon:</span>
+                  <div className="flex gap-2.5 items-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAutoAlertEnabled(!isAutoAlertEnabled);
+                        setHardwareLog(prev => [
+                          ...prev,
+                          `[OSINT_SENTINEL] Anomaly Auto-Daemon adjusted to: ${!isAutoAlertEnabled ? 'ENABLED' : 'DISABLED'}`
+                        ]);
+                      }}
+                      className={`px-2 py-0.5 rounded text-[8px] border ${
+                        isAutoAlertEnabled 
+                          ? 'border-emerald-500/20 bg-emerald-950/30 text-emerald-400' 
+                          : 'border-white/10 bg-black text-white/30'
+                      }`}
+                    >
+                      {isAutoAlertEnabled ? 'Auto On' : 'Auto Off'}
+                    </button>
+                    
+                    {/* Manual trigger button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        playAlertBeep();
+                        const payloads = [
+                          {
+                            source: 'Reflector Buildings' as const,
+                            severity: 'critical' as const,
+                            message: 'Dynamic infrared spatial flare detected inside central corridor chamber. Structural anomalies match heavy drone calibrations.',
+                            coordinates: '53.3498° N, 6.2603° W'
+                          },
+                          {
+                            source: 'Eagle Train' as const,
+                            severity: 'high' as const,
+                            message: 'Eagle Train acoustic echo deviation spotted at Checkpoint-3 on the outer spur route. Ground tracker deployed.',
+                            coordinates: '78.2201° N, 15.6502° E'
+                          }
+                        ];
+                        const triggerItem = payloads[Math.floor(Math.random() * payloads.length)];
+                        const customA: OSINTAlert = {
+                          id: `alert-manual-${Date.now()}`,
+                          source: triggerItem.source,
+                          severity: triggerItem.severity,
+                          message: triggerItem.message,
+                          coordinates: triggerItem.coordinates,
+                          timestamp: new Date().toISOString(),
+                          status: 'unread'
+                        };
+                        setOsintAlerts(prev => [customA, ...prev]);
+                        setHardwareLog(prev => [
+                          ...prev,
+                          `[OSINT_SENTINEL] Manual trace intercept injected matching '${triggerItem.source}'.`
+                        ]);
+                      }}
+                      className="px-2 py-0.5 rounded text-[8px] bg-indigo-950/50 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-600 hover:text-white transition-all"
+                    >
+                      Scan Now
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-[220px] overflow-y-auto pr-1 space-y-2.5 scrollbar-thin scrollbar-thumb-white/10">
+                  {osintAlerts.filter(a => a.status !== 'wiped').length === 0 ? (
+                    <div className="text-center py-6 text-white/30 text-[10px] uppercase">
+                      All anomalies cleared & wiped. Grid is fully dark.
+                    </div>
+                  ) : (
+                    osintAlerts
+                      .filter(a => a.status !== 'wiped')
+                      .map((alert) => (
+                        <div 
+                          key={alert.id} 
+                          className={`p-3 border rounded-xl flex flex-col gap-2 transition-all duration-300 ${
+                            alert.status === 'unread' 
+                              ? 'bg-fuchsia-950/15 border-fuchsia-500/35 relative overflow-hidden shadow-[0_0_10px_rgba(217,70,239,0.05)]' 
+                              : 'bg-black/30 border-white/10'
+                          }`}
+                        >
+                          {alert.status === 'unread' && (
+                            <div className="absolute top-0 right-0 w-24 h-[2px] bg-gradient-to-r from-transparent via-fuchsia-500 to-transparent animate-pulse" />
+                          )}
+                          
+                          <div className="flex justify-between items-center text-[8px] uppercase font-bold">
+                            <span className={`px-2 py-0.5 rounded ${
+                              alert.severity === 'critical' ? 'bg-red-950/80 text-red-400 border border-red-500/35 animate-pulse' :
+                              alert.severity === 'high' ? 'bg-amber-950/80 text-amber-400 border border-amber-500/35' :
+                              'bg-zinc-900 text-slate-400 border border-white/10'
+                            }`}>
+                              [{alert.source}] {alert.severity}
+                            </span>
+                            <span className="text-white/30">{formatTimeAgo(alert.timestamp)}</span>
+                          </div>
+
+                          <p className="text-[10px] text-white/85 leading-relaxed font-sans">{alert.message}</p>
+
+                          <div className="flex justify-between items-center pt-2 border-t border-white/5 text-[9px] font-mono">
+                            <span className="text-white/40">Lock: <span className="text-fuchsia-400">{alert.coordinates}</span></span>
+                            <div className="flex gap-1.5">
+                              {alert.status === 'unread' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOsintAlerts(prev => prev.map(a => a.id === alert.id ? { ...a, status: 'acknowledged' } : a));
+                                    setHardwareLog(prev => [...prev, `[OSINT] Acknowledged ${alert.source} spatial intercept.`]);
+                                  }}
+                                  className="text-[8px] uppercase tracking-widest text-[#cf59d4] hover:bg-fuchsia-950/40 px-1.5 py-0.5 rounded border border-fuchsia-500/20"
+                                >
+                                  Ack
+                                </button>
+                              ) : (
+                                <span className="text-emerald-500 text-[8px] flex items-center gap-1">
+                                  <Check className="w-2.5 h-2.5" /> Checked
+                                </span>
+                              )}
+                              <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOsintAlerts(prev => prev.map(a => a.id === alert.id ? { ...a, status: 'wiped' } : a));
+                                    setHardwareLog(prev => [...prev, `[OSINT] Wiped anomaly footprint for index: ${alert.id}`]);
+                                  }}
+                                  className="text-[8px] uppercase text-red-400/70 hover:text-red-400 hover:bg-red-950/20 px-1.5 py-0.5 rounded"
+                                  title="Wipe signal trace"
+                                >
+                                  Wipe
+                                </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* --- LOCATION SPOOFER CONTAINER --- */
+              <div className="space-y-4">
+                <div className="flex flex-col gap-3">
+                  <span className="text-[9px] uppercase text-white/30 tracking-widest">Active Fake Core Coordinates:</span>
+                  
+                  {/* Presets Grid */}
+                  <div className="grid grid-cols-2 gap-2 text-left">
+                    {PRESET_MOCK_LOCATIONS.map((loc, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => {
+                          playAlertBeep();
+                          setActiveLocationIndex(idx);
+                          setIsCustomSpoofActive(false);
+                          setHardwareLog(prev => [
+                            ...prev,
+                            `[GPS_SPOOF] Set mock relocation gateway preset to: ${loc.name}. Coordinates masked.`
+                          ]);
+                        }}
+                        className={`p-2 bg-black/50 border rounded-xl text-left transition-all ${
+                          activeLocationIndex === idx && !isCustomSpoofActive
+                            ? 'border-fuchsia-500/40 bg-fuchsia-950/10 text-fuchsia-300'
+                            : 'border-white/5 text-white/50 hover:border-white/20'
+                        }`}
+                      >
+                        <div className="text-[9px] font-bold uppercase truncate">{loc.name}</div>
+                        <div className="text-[7.5px] text-white/30 mt-0.5 lowercase tracking-wider">{loc.lat}, {loc.lng}</div>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Custom coordinates form */}
+                  <div className="border-t border-white/5 pt-3.5 space-y-2">
+                    <p className="text-[9px] uppercase tracking-widest text-[#cf59d4] font-bold">Manual Latitude/Longitude Override</p>
+                    <div className="flex gap-2">
+                      <div className="flex-1">
+                        <span className="text-[7.5px] uppercase text-white/30 block mb-0.5 font-bold">Latitude:</span>
+                        <input
+                          type="text"
+                          value={isCustomSpoofActive ? customLat : PRESET_MOCK_LOCATIONS[activeLocationIndex].lat}
+                          onChange={(e) => {
+                            setCustomLat(e.target.value);
+                            setIsCustomSpoofActive(true);
+                          }}
+                          className="w-full bg-black border border-white/10 px-2 py-1 text-[10px] uppercase font-mono text-fuchsia-300 focus:outline-none focus:border-fuchsia-500"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <span className="text-[7.5px] uppercase text-white/30 block mb-0.5 font-bold">Longitude:</span>
+                        <input
+                          type="text"
+                          value={isCustomSpoofActive ? customLng : PRESET_MOCK_LOCATIONS[activeLocationIndex].lng}
+                          onChange={(e) => {
+                            setCustomLng(e.target.value);
+                            setIsCustomSpoofActive(true);
+                          }}
+                          className="w-full bg-black border border-white/10 px-2 py-1 text-[10px] uppercase font-mono text-fuchsia-300 focus:outline-none focus:border-fuchsia-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center text-[8.5px] text-white/35 pt-1 leading-normal">
+                      <span>Coordinates stream seamlessly into active terminal processes.</span>
+                      {isCustomSpoofActive && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsCustomSpoofActive(false);
+                            setCustomLat(PRESET_MOCK_LOCATIONS[activeLocationIndex].lat);
+                            setCustomLng(PRESET_MOCK_LOCATIONS[activeLocationIndex].lng);
+                            setHardwareLog(prev => [...prev, `[SPOOF] Reset core to preset: ${PRESET_MOCK_LOCATIONS[activeLocationIndex].name}`]);
+                          }}
+                          className="text-fuchsia-400 hover:text-fuchsia-300 font-bold"
+                        >
+                          Restore Preset
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ==================== HARDWARE & OVERRIDES (ESP_GEEK CLAW) ==================== */}
