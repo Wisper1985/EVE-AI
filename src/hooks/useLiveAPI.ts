@@ -284,5 +284,6 @@ export function useLiveAPI(config: LiveAPIConfig) {
     sendVideo,
     sendText,
     clearTranscript,
+    setTranscript,
   };
 }

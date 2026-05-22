@@ -6,9 +6,10 @@ interface MediaStreamerProps {
   onVideoFrame: (base64: string) => void;
   isActive: boolean;
   facingMode?: "user" | "environment";
+  onFaceGaze?: (gaze: { x: number; y: number } | null) => void;
 }
 
-export function MediaStreamer({ onAudioData, onVideoFrame, isActive, facingMode = "user" }: MediaStreamerProps) {
+export function MediaStreamer({ onAudioData, onVideoFrame, isActive, facingMode = "user", onFaceGaze }: MediaStreamerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -19,6 +20,7 @@ export function MediaStreamer({ onAudioData, onVideoFrame, isActive, facingMode 
   const [capabilities, setCapabilities] = useState<any>(null);
   const [detectedFaces, setDetectedFaces] = useState<any[]>([]);
   const detectorRef = useRef<any>(null);
+  const smoothFaceRef = useRef({ x: 160, y: 120, initialized: false });
 
   useEffect(() => {
     // Initialize Face Detector if available
@@ -45,45 +47,92 @@ export function MediaStreamer({ onAudioData, onVideoFrame, isActive, facingMode 
       // Stop existing stream before starting a new one (important for camera switching)
       stopStream();
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          width: { ideal: 1280 }, 
-          height: { ideal: 720 },
-          facingMode: facingMode
-        },
-        audio: true
-      });
+      let stream: MediaStream;
+      try {
+        // Tier 1: Request video & audio
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { 
+            width: { ideal: 1280 }, 
+            height: { ideal: 720 },
+            facingMode: facingMode
+          },
+          audio: true
+        });
+      } catch (firstErr) {
+        console.warn("Dual-hardware streaming acquisition failed, falling back to video-only:", firstErr);
+        try {
+          // Tier 2: Video-only stream query
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { 
+              width: { ideal: 1280 }, 
+              height: { ideal: 720 },
+              facingMode: facingMode
+            },
+            audio: false
+          });
+        } catch (secondErr) {
+          console.warn("Video hardware streaming acquisition failed, falling back to audio-only:", secondErr);
+          // Tier 3: Audio-only stream query (no camera feed)
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: false,
+            audio: true
+          });
+        }
+      }
+      
       streamRef.current = stream;
 
-      const track = stream.getVideoTracks()[0];
-      const caps = track.getCapabilities ? track.getCapabilities() : {};
-      setCapabilities(caps);
+      const hasVideo = stream.getVideoTracks().length > 0;
+      const hasAudio = stream.getAudioTracks().length > 0;
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+      if (hasVideo) {
+        const track = stream.getVideoTracks()[0];
+        const caps = track.getCapabilities ? track.getCapabilities() : {};
+        setCapabilities(caps);
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      } else {
+        setCapabilities(null);
+        if (videoRef.current) {
+          videoRef.current.srcObject = null;
+        }
       }
 
-      // Audio processing
-      audioContextRef.current = new AudioContext({ sampleRate: 16000 });
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      processorRef.current = audioContextRef.current.createScriptProcessor(4096, 1, 1);
+      // Audio processing (only if an active sound track was resolved)
+      if (hasAudio) {
+        try {
+          audioContextRef.current = new AudioContext({ sampleRate: 16000 });
+          const source = audioContextRef.current.createMediaStreamSource(stream);
+          processorRef.current = audioContextRef.current.createScriptProcessor(4096, 1, 1);
 
-      processorRef.current.onaudioprocess = (e) => {
-        const inputData = e.inputBuffer.getChannelData(0);
-        const pcmData = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+          processorRef.current.onaudioprocess = (e) => {
+            const inputData = e.inputBuffer.getChannelData(0);
+            const pcmData = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+              pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+            }
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(pcmData.buffer)));
+            onAudioData(base64);
+          };
+
+          source.connect(processorRef.current);
+          processorRef.current.connect(audioContextRef.current.destination);
+        } catch (audioErr) {
+          console.error("Failed to initialize system audio graph context:", audioErr);
         }
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(pcmData.buffer)));
-        onAudioData(base64);
-      };
-
-      source.connect(processorRef.current);
-      processorRef.current.connect(audioContextRef.current.destination);
+      }
 
       // Video processing & Face Detection loop
       const captureFrame = async () => {
         if (!isActive) return;
+        if (!streamRef.current || streamRef.current.getVideoTracks().length === 0) {
+          // No active video track is available, skip visual processing frame captures
+          setTimeout(captureFrame, 1000);
+          return;
+        }
+
         if (videoRef.current && canvasRef.current) {
           const context = canvasRef.current.getContext('2d');
           if (context) {
@@ -91,14 +140,126 @@ export function MediaStreamer({ onAudioData, onVideoFrame, isActive, facingMode 
             const base64 = canvasRef.current.toDataURL('image/jpeg', 0.5).split(',')[1];
             onVideoFrame(base64);
 
-            // Face Detection
+            // Face Detection & Fallback skin tone centroid tracking
+            let facesToSet: any[] = [];
+            
             if (detectorRef.current && videoRef.current.readyState >= 2) {
                 try {
-                    const faces = await detectorRef.current.detect(videoRef.current);
-                    setDetectedFaces(faces);
+                    facesToSet = await detectorRef.current.detect(videoRef.current);
                 } catch (e) {
                     console.warn("Face detection error:", e);
                 }
+            }
+
+            // Fallback tracking algorithm if native face detection is unavailable or returns no candidates
+            if (facesToSet.length === 0) {
+              try {
+                const imgData = context.getImageData(0, 0, 320, 240);
+                const data = imgData.data;
+                let sumX = 0;
+                let sumY = 0;
+                let count = 0;
+                
+                // Downsample pixel array scan by 4 for 60fps-equivalent performance and instant lookup
+                for (let y = 0; y < 240; y += 4) {
+                  for (let x = 0; x < 320; x += 4) {
+                    const idx = (y * 320 + x) * 4;
+                    const r = data[idx];
+                    const g = data[idx + 1];
+                    const b = data[idx + 2];
+                    
+                    // Dynamic biological skin frequency mapping boundaries in standard sRGB spectrum
+                    if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 10 && (r - b) > 10) {
+                      sumX += x;
+                      sumY += y;
+                      count++;
+                    }
+                  }
+                }
+                
+                if (count > 60) {
+                  const rawFaceX = sumX / count;
+                  const rawFaceY = sumY / count;
+                  
+                  if (!smoothFaceRef.current.initialized) {
+                    smoothFaceRef.current = { x: rawFaceX, y: rawFaceY, initialized: true };
+                  } else {
+                    smoothFaceRef.current.x = smoothFaceRef.current.x * 0.75 + rawFaceX * 0.25;
+                    smoothFaceRef.current.y = smoothFaceRef.current.y * 0.75 + rawFaceY * 0.25;
+                  }
+                  
+                  facesToSet = [{
+                    boundingBox: {
+                      x: smoothFaceRef.current.x - 40,
+                      y: smoothFaceRef.current.y - 50,
+                      width: 80,
+                      height: 100
+                    },
+                    source: 'backup_stencil'
+                  }];
+                } else {
+                  // Slowly drift gaze to the absolute center grid point if tracking is lost
+                  if (smoothFaceRef.current.initialized) {
+                    smoothFaceRef.current.x = smoothFaceRef.current.x * 0.9 + 160 * 0.1;
+                    smoothFaceRef.current.y = smoothFaceRef.current.y * 0.9 + 120 * 0.1;
+                    facesToSet = [{
+                      boundingBox: {
+                        x: smoothFaceRef.current.x - 40,
+                        y: smoothFaceRef.current.y - 50,
+                        width: 80,
+                        height: 100
+                      },
+                      source: 'backup_stencil'
+                    }];
+                  }
+                }
+              } catch (err) {
+                console.warn("Fallback centroid tracker failed:", err);
+              }
+            } else {
+              // Smooth out active native face coordinates coordinates as well
+              const face = facesToSet[0];
+              const vWidth = videoRef.current?.videoWidth || 320;
+              const vHeight = videoRef.current?.videoHeight || 240;
+              const rawFaceX = (face.boundingBox.x + face.boundingBox.width / 2) * (320 / vWidth);
+              const rawFaceY = (face.boundingBox.y + face.boundingBox.height / 2) * (240 / vHeight);
+              
+              if (!smoothFaceRef.current.initialized) {
+                smoothFaceRef.current = { x: rawFaceX, y: rawFaceY, initialized: true };
+              } else {
+                smoothFaceRef.current.x = smoothFaceRef.current.x * 0.75 + rawFaceX * 0.25;
+                smoothFaceRef.current.y = smoothFaceRef.current.y * 0.75 + rawFaceY * 0.25;
+              }
+            }
+
+            setDetectedFaces(facesToSet);
+
+            // Forward the calculated user coordinate relative offsets [-1, +1]
+            if (facesToSet.length > 0 && onFaceGaze) {
+              const face = facesToSet[0];
+              let cx = 0.5;
+              let cy = 0.5;
+              
+              if (face.source === 'backup_stencil') {
+                cx = (face.boundingBox.x + face.boundingBox.width / 2) / 320;
+                cy = (face.boundingBox.y + face.boundingBox.height / 2) / 240;
+              } else {
+                const vWidth = videoRef.current?.videoWidth || 320;
+                const vHeight = videoRef.current?.videoHeight || 240;
+                cx = (face.boundingBox.x + face.boundingBox.width / 2) / vWidth;
+                cy = (face.boundingBox.y + face.boundingBox.height / 2) / vHeight;
+              }
+              
+              // Invert Gaze X so pupils look in the correct absolute direction (mirror mode matching)
+              const gazeX = -((cx - 0.5) * 2);
+              const gazeY = (cy - 0.5) * 2;
+              
+              onFaceGaze({
+                x: Math.max(-1, Math.min(1, gazeX)),
+                y: Math.max(-1, Math.min(1, gazeY))
+              });
+            } else if (onFaceGaze) {
+              onFaceGaze(null);
             }
           }
         }
@@ -188,11 +349,14 @@ export function MediaStreamer({ onAudioData, onVideoFrame, isActive, facingMode 
             // Calculate relative positions
             const vWidth = videoRef.current?.videoWidth || 1;
             const vHeight = videoRef.current?.videoHeight || 1;
+            const widthDiv = face.source === 'backup_stencil' ? 320 : vWidth;
+            const heightDiv = face.source === 'backup_stencil' ? 240 : vHeight;
+
             const style = {
-              left: `${(face.boundingBox.x / vWidth) * 100}%`,
-              top: `${(face.boundingBox.y / vHeight) * 100}%`,
-              width: `${(face.boundingBox.width / vWidth) * 100}%`,
-              height: `${(face.boundingBox.height / vHeight) * 100}%`,
+              left: `${(face.boundingBox.x / widthDiv) * 100}%`,
+              top: `${(face.boundingBox.y / heightDiv) * 100}%`,
+              width: `${(face.boundingBox.width / widthDiv) * 100}%`,
+              height: `${(face.boundingBox.height / heightDiv) * 100}%`,
             };
 
             return (

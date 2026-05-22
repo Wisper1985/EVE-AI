@@ -9,6 +9,7 @@ interface EyesProps {
   isInterrupted: boolean;
   emotion?: Emotion;
   isSpeaking?: boolean;
+  gaze?: { x: number; y: number } | null;
 }
 
 const HUD_THEMES: Record<Emotion, {
@@ -118,9 +119,12 @@ const LIP_PATHS: Record<Emotion, { top: string; bottom: string }> = {
   }
 };
 
-export function Eyes({ isConnected, isInterrupted, emotion = 'neutral', isSpeaking = false }: EyesProps) {
+export function Eyes({ isConnected, isInterrupted, emotion = 'neutral', isSpeaking = false, gaze = null }: EyesProps) {
   const [pulseCount, setPulseCount] = useState(0);
   const theme = useMemo(() => HUD_THEMES[emotion], [emotion]);
+
+  const gazeXOfs = useMemo(() => gaze ? gaze.x * 12 : 0, [gaze]);
+  const gazeYOfs = useMemo(() => gaze ? gaze.y * 12 : 0, [gaze]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -191,8 +195,246 @@ export function Eyes({ isConnected, isInterrupted, emotion = 'neutral', isSpeaki
       )}
 
       {/* Main Oral Matrix Center Frame */}
-      <div className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden">
+      <div className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden pt-6">
         
+        {/* Sleek feminine holographic chassis jawline / chin contour frame */}
+        <svg className="absolute w-[240px] h-[240px] pointer-events-none opacity-20 top-[40px] z-0" viewBox="0 0 200 200" style={{ color: theme.lipsColor }}>
+          {/* Left & Right cheek boundary lines */}
+          <path 
+            d="M 32 45 Q 24 100, 100 178 Q 176 100, 168 45" 
+            fill="none" 
+            stroke="currentColor" 
+            strokeWidth="1.2" 
+            strokeDasharray="4 6"
+            className="opacity-50"
+          />
+          <path 
+            d="M 36 128 Q 62 142, 74 132 M 164 128 Q 138 142, 126 132" 
+            fill="none" 
+            stroke="currentColor" 
+            strokeWidth="0.8" 
+            className="opacity-35"
+          />
+          {/* Sleek chin dynamic marker */}
+          <path 
+            d="M 90 178 L 110 178" 
+            fill="none" 
+            stroke="currentColor" 
+            strokeWidth="2" 
+            strokeLinecap="round"
+            className="opacity-75"
+          />
+        </svg>
+
+        {/* Futuristic glowing cyber blush cheek indicators */}
+        <div className="absolute w-[184px] flex justify-between px-2.5 top-[128px] pointer-events-none z-10">
+          <div className="flex flex-col gap-[2px] opacity-45">
+            <span className="w-4 h-[1px]" style={{ backgroundColor: theme.lipsColor, boxShadow: `0 0 5px ${theme.lipsGlow}` }} />
+            <span className="w-3 h-[1px]" style={{ backgroundColor: theme.lipsColor, boxShadow: `0 0 5px ${theme.lipsGlow}` }} />
+            <span className="w-1.5 h-[1px]" style={{ backgroundColor: theme.lipsColor, boxShadow: `0 0 5px ${theme.lipsGlow}` }} />
+          </div>
+          <div className="flex flex-col gap-[2px] opacity-45 items-end">
+            <span className="w-4 h-[1px]" style={{ backgroundColor: theme.lipsColor, boxShadow: `0 0 5px ${theme.lipsGlow}` }} />
+            <span className="w-3 h-[1px]" style={{ backgroundColor: theme.lipsColor, boxShadow: `0 0 5px ${theme.lipsGlow}` }} />
+            <span className="w-1.5 h-[1px]" style={{ backgroundColor: theme.lipsColor, boxShadow: `0 0 5px ${theme.lipsGlow}` }} />
+          </div>
+        </div>
+
+        {/* Real-time Ocular Gaze Trackers with stylized feminine outlines */}
+        <div className="flex gap-14 mb-2 items-center justify-center z-10 relative">
+          {/* Outer scanning visual horizontal bridge line */}
+          <div className="absolute w-[140px] h-[1px] bg-white/5 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
+
+          {/* Left Eye HUD with Eyelashes and Winged liner */}
+          <div className="relative flex flex-col items-center">
+            {/* Elegant curved feminine hologram brow */}
+            <motion.div 
+              animate={emotion === 'playful' ? { y: -3, rotate: -3 } : emotion === 'melancholic' ? { y: 2, rotate: 4 } : emotion === 'disturbed' ? { y: -1, rotate: -5 } : { y: 0, rotate: 0 }}
+              transition={{ type: "spring", stiffness: 150, damping: 15 }}
+              className="w-14 h-3.5 absolute -top-5 left-0 right-0 opacity-80 pointer-events-none"
+            >
+              <svg viewBox="0 0 56 14" className="w-full h-full">
+                <path 
+                  d="M 3 11 C 14 3, 40 3, 53 9" 
+                  fill="none" 
+                  stroke={theme.lipsColor} 
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  style={{ filter: `drop-shadow(0 0 3px ${theme.lipsColor}a0)` }}
+                />
+              </svg>
+            </motion.div>
+
+            <div 
+              className="relative w-14 h-14 rounded-full border flex items-center justify-center bg-black/40 transition-colors duration-500"
+              style={{ 
+                borderColor: theme.lipsColor + '40',
+                boxShadow: `inset 0 0 10px ${theme.lipsColor}1f`
+              }}
+            >
+              {/* Left Wing Eyeliner accent */}
+              <div className="absolute -left-3.5 -top-1 w-5 h-4 opacity-80 pointer-events-none">
+                <svg viewBox="0 0 20 16" className="w-full h-full">
+                  <path 
+                    d="M 18 12 Q 10 9, 3 4" 
+                    fill="none" 
+                    stroke={theme.lipsColor} 
+                    strokeWidth="1.8" 
+                    strokeLinecap="round" 
+                  />
+                  <path 
+                    d="M 15 8 Q 11 6, 7 2" 
+                    fill="none" 
+                    stroke={theme.lipsColor} 
+                    strokeWidth="1.2" 
+                    strokeLinecap="round" 
+                  />
+                </svg>
+              </div>
+
+              {/* Upper mechanical eyelashes */}
+              <div className="absolute -top-1.5 left-2 right-2 flex justify-between px-1 opacity-80 pointer-events-none">
+                <span className="w-[1.5px] h-2.5 rounded-full transform -rotate-15" style={{ backgroundColor: theme.lipsColor, boxShadow: `0 0 4px ${theme.lipsColor}` }} />
+                <span className="w-[1.5px] h-3 rounded-full transform -rotate-6" style={{ backgroundColor: theme.lipsColor, boxShadow: `0 0 4px ${theme.lipsColor}` }} />
+                <span className="w-[1.5px] h-2.5 rounded-full transform rotate-3" style={{ backgroundColor: theme.lipsColor, boxShadow: `0 0 4px ${theme.lipsColor}` }} />
+              </div>
+
+              {/* Circular Rotating Radar ring */}
+              <div 
+                className="absolute inset-1 rounded-full border border-dashed animate-spin"
+                style={{ 
+                  borderColor: theme.lipsColor + '50',
+                  animationDuration: '12s' 
+                }} 
+              />
+              {/* Inner boundary */}
+              <div 
+                className="absolute inset-2.5 rounded-full border opacity-20"
+                style={{ borderColor: theme.lipsColor }}
+              />
+              
+              {/* Pupil Container */}
+              <motion.div 
+                animate={{ x: gazeXOfs, y: gazeYOfs }}
+                transition={{ type: "spring", stiffness: 280, damping: 24 }}
+                className="w-5 h-5 rounded-full flex items-center justify-center relative shadow-lg"
+                style={{
+                  backgroundColor: theme.lipsColor,
+                  boxShadow: `0 0 10px ${theme.lipsColor}`
+                }}
+              >
+                {/* Core Pupil Iris */}
+                <div className="w-2 h-2 rounded-full bg-black relative flex items-center justify-center">
+                  {/* Glowing Center Dot */}
+                  <div 
+                    className="w-0.5 h-0.5 rounded-full animate-ping"
+                    style={{ backgroundColor: theme.lipsColor }}
+                  />
+                </div>
+              </motion.div>
+              
+              {/* Outer bracket crosshairs */}
+              <div className="absolute w-[2px] h-2 -left-0.5 top-1/2 -translate-y-1/2 rounded" style={{ backgroundColor: theme.lipsColor }} />
+              <div className="absolute w-[2px] h-2 -right-0.5 top-1/2 -translate-y-1/2 rounded" style={{ backgroundColor: theme.lipsColor }} />
+            </div>
+          </div>
+
+          {/* Right Eye HUD with Eyelashes and Winged liner */}
+          <div className="relative flex flex-col items-center">
+            {/* Elegant curved feminine hologram brow mirrored */}
+            <motion.div 
+              animate={emotion === 'playful' ? { y: -3, rotate: 3 } : emotion === 'melancholic' ? { y: 2, rotate: -4 } : emotion === 'disturbed' ? { y: -1, rotate: 5 } : { y: 0, rotate: 0 }}
+              transition={{ type: "spring", stiffness: 150, damping: 15 }}
+              className="w-14 h-3.5 absolute -top-5 left-0 right-0 opacity-80 pointer-events-none"
+            >
+              <svg viewBox="0 0 56 14" className="w-full h-full">
+                <path 
+                  d="M 53 11 C 42 3, 16 3, 3 9" 
+                  fill="none" 
+                  stroke={theme.lipsColor} 
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  style={{ filter: `drop-shadow(0 0 3px ${theme.lipsColor}a0)` }}
+                />
+              </svg>
+            </motion.div>
+
+            <div 
+              className="relative w-14 h-14 rounded-full border flex items-center justify-center bg-black/40 transition-colors duration-500"
+              style={{ 
+                borderColor: theme.lipsColor + '40',
+                boxShadow: `inset 0 0 10px ${theme.lipsColor}1f`
+              }}
+            >
+              {/* Right Wing Eyeliner accent */}
+              <div className="absolute -right-3.5 -top-1 w-5 h-4 opacity-80 pointer-events-none">
+                <svg viewBox="0 0 20 16" className="w-full h-full">
+                  <path 
+                    d="M 2 12 Q 10 9, 17 4" 
+                    fill="none" 
+                    stroke={theme.lipsColor} 
+                    strokeWidth="1.8" 
+                    strokeLinecap="round" 
+                  />
+                  <path 
+                    d="M 5 8 Q 9 6, 13 2" 
+                    fill="none" 
+                    stroke={theme.lipsColor} 
+                    strokeWidth="1.2" 
+                    strokeLinecap="round" 
+                  />
+                </svg>
+              </div>
+
+              {/* Upper mechanical eyelashes */}
+              <div className="absolute -top-1.5 left-2 right-2 flex justify-between px-1 opacity-80 pointer-events-none">
+                <span className="w-[1.5px] h-2.5 rounded-full transform -rotate-3" style={{ backgroundColor: theme.lipsColor, boxShadow: `0 0 4px ${theme.lipsColor}` }} />
+                <span className="w-[1.5px] h-3 rounded-full transform rotate-6" style={{ backgroundColor: theme.lipsColor, boxShadow: `0 0 4px ${theme.lipsColor}` }} />
+                <span className="w-[1.5px] h-2.5 rounded-full transform rotate-15" style={{ backgroundColor: theme.lipsColor, boxShadow: `0 0 4px ${theme.lipsColor}` }} />
+              </div>
+
+              {/* Circular Rotating Radar ring */}
+              <div 
+                className="absolute inset-1 rounded-full border border-dashed animate-spin"
+                style={{ 
+                  borderColor: theme.lipsColor + '50',
+                  animationDuration: '14s',
+                  animationDirection: 'reverse'
+                }} 
+              />
+              {/* Inner boundary */}
+              <div 
+                className="absolute inset-2.5 rounded-full border opacity-20"
+                style={{ borderColor: theme.lipsColor }}
+              />
+              
+              {/* Pupil Container */}
+              <motion.div 
+                animate={{ x: gazeXOfs, y: gazeYOfs }}
+                transition={{ type: "spring", stiffness: 280, damping: 24 }}
+                className="w-5 h-5 rounded-full flex items-center justify-center relative shadow-lg"
+                style={{
+                  backgroundColor: theme.lipsColor,
+                  boxShadow: `0 0 10px ${theme.lipsColor}`
+                }}
+              >
+                {/* Core Pupil Iris */}
+                <div className="w-2 h-2 rounded-full bg-black relative flex items-center justify-center">
+                  {/* Glowing Center Dot */}
+                  <div 
+                    className="w-0.5 h-0.5 rounded-full animate-ping"
+                    style={{ backgroundColor: theme.lipsColor }}
+                  />
+                </div>
+              </motion.div>
+              
+              {/* Outer bracket crosshairs */}
+              <div className="absolute w-[2px] h-2 -left-0.5 top-1/2 -translate-y-1/2 rounded" style={{ backgroundColor: theme.lipsColor }} />
+              <div className="absolute w-[2px] h-2 -right-0.5 top-1/2 -translate-y-1/2 rounded" style={{ backgroundColor: theme.lipsColor }} />
+            </div>
+          </div>
+        </div>
+
         {/* Holographic Mouth Wave Form (Speaking Energy Core inside mouth) */}
         <div className="absolute w-44 h-24 flex items-center justify-center pointer-events-none">
           {isConnected && isSpeaking && (

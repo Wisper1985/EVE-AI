@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useLiveAPI, VoiceName } from './hooks/useLiveAPI';
 import { Eyes, Emotion } from './components/Eyes';
 import { MediaStreamer } from './components/MediaStreamer';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, Plus, Trash2, Zap, Sparkles, MessageSquare, 
   RefreshCw, Cpu, Brain, Eye, Camera, AlertOctagon,
@@ -135,12 +136,39 @@ const playAlertBeep = () => {
   }
 };
 
+const playSuccessBeep = () => {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    // Ascending sci-fi double audio chime
+    osc.frequency.setValueAtTime(640, ctx.currentTime);
+    osc.frequency.setValueAtTime(960, ctx.currentTime + 0.08);
+    gain.gain.setValueAtTime(0.03, ctx.currentTime);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
+    osc.stop(ctx.currentTime + 0.25);
+  } catch (e) {
+    // browser blocked context
+  }
+};
+
 
 export default function App() {
   const [activeVoice, setActiveVoice] = useState<VoiceName>('Fenrir');
   const [activeEmotion, setActiveEmotion] = useState<Emotion>('neutral');
   const [displayMode, setDisplayMode] = useState<'hologram' | 'camera' | 'projector'>('hologram');
   const [clawState, setClawState] = useState<'OPEN' | 'CLOSE' | 'SYNCING'>('OPEN');
+  
+  // REST Relay Fallback backup connection states
+  const [isFallbackMode, setIsFallbackMode] = useState(false);
+  const [isFallbackQuerying, setIsFallbackQuerying] = useState(false);
+
+  // Real-time user face gaze coordinate mapping state
+  const [gaze, setGaze] = useState<{ x: number; y: number } | null>(null);
   
   // Image Generation States
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>(() => {
@@ -329,6 +357,7 @@ export default function App() {
     sendVideo,
     sendText,
     clearTranscript,
+    setTranscript,
   } = useLiveAPI({
     model: 'gemini-3.1-flash-live-preview', // Correct live conversational websocket model name on v1 API
     voice: activeVoice,
@@ -476,20 +505,63 @@ export default function App() {
   }, []);
 
   // Submit Text Input manually to Terminal link
-  const handleTerminalSubmit = (e: React.FormEvent) => {
+  const handleTerminalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!manualInput.trim()) return;
+    const queryText = manualInput.trim();
+    if (!queryText) return;
     
     // Check if it is a command for the physical claw
-    const textLower = manualInput.toLowerCase();
+    const textLower = queryText.toLowerCase();
     if (textLower.includes('claw') && textLower.includes('close')) {
       executeClawMovement('CLOSE');
     } else if (textLower.includes('claw') && textLower.includes('open')) {
       executeClawMovement('OPEN');
     }
 
-    sendText(manualInput);
-    setManualInput('');
+    if (isFallbackMode) {
+      setManualInput('');
+      setTranscript(prev => [...prev, { role: 'user', text: queryText }]);
+      setIsFallbackQuerying(true);
+      setHardwareLog(prev => [...prev, `[REST_CHAT] Requesting conversational inference via backup uplink...`]);
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: queryText,
+            history: transcript,
+            systemInstruction
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.text) {
+            playSuccessBeep();
+            setTranscript(prev => [...prev, { role: 'model', text: data.text }]);
+            setHardwareLog(prev => [...prev, `[REST_CHAT] Backup response synthesized successfully.`]);
+          } else {
+            throw new Error(data.error || "Uplink response format was invalid.");
+          }
+        } else {
+          const errorMsg = await response.text();
+          throw new Error(errorMsg || "Uplink server returned failure response.");
+        }
+      } catch (err: any) {
+        console.error("Conversation fallback query failed:", err);
+        playAlertBeep();
+        setHardwareLog(prev => [...prev, `[REST_CHAT_ERROR] Link failure: ${err?.message}`]);
+        setTranscript(prev => [...prev, { 
+          role: 'model', 
+          text: `[REST RELAY EXCEPTION] My main satellite transceiver is experiencing systemic service outages. However, backup hardware is active. Error detail: ${err?.message || "Internal failure"}` 
+        }]);
+      } finally {
+        setIsFallbackQuerying(false);
+      }
+    } else {
+      sendText(queryText);
+      setManualInput('');
+    }
   };
 
   // --- 5. INTERACTIVE MEMORY ACTIONS ---
@@ -768,6 +840,17 @@ export default function App() {
 
             {/* Display Active Monitor Frame */}
             <div className="w-full flex items-center justify-center min-h-[340px] relative mt-12">
+              
+              {/* Persistent MediaStreamer layout running background telemetry + gaze updates */}
+              <div className={`w-full max-w-[420px] aspect-square flex items-center justify-center ${displayMode === 'camera' ? 'block' : 'hidden absolute opacity-0 pointer-events-none'}`}>
+                <MediaStreamer 
+                  onAudioData={sendAudio}
+                  onVideoFrame={sendVideo}
+                  isActive={isConnected}
+                  onFaceGaze={setGaze}
+                />
+              </div>
+
               {displayMode === 'hologram' ? (
                 <div className="flex flex-col items-center">
                   <Eyes 
@@ -775,6 +858,7 @@ export default function App() {
                     isInterrupted={isInterrupted} 
                     emotion={activeEmotion} 
                     isSpeaking={isSpeaking}
+                    gaze={gaze}
                   />
                   {/* Active Emotion Display readouts */}
                   {isConnected && (
@@ -785,12 +869,10 @@ export default function App() {
                   )}
                 </div>
               ) : displayMode === 'camera' ? (
-                <div className="w-full max-w-[420px] aspect-square flex items-center justify-center">
-                  <MediaStreamer 
-                    onAudioData={sendAudio}
-                    onVideoFrame={sendVideo}
-                    isActive={isConnected}
-                  />
+                /* Small digital tracking diagnostics layer when viewing camera directly */
+                <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/80 px-2.5 py-1 font-mono text-[8px] text-cyan-400 border border-cyan-500/20 rounded-md">
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                  Gaze locked: {gaze ? `X:${gaze.x.toFixed(2)} Y:${gaze.y.toFixed(2)}` : 'Scanning...'}
                 </div>
               ) : (
                 /* 📽️ DYNAMICFuturistic VISUAL PROJECTOR HUB */
@@ -985,29 +1067,81 @@ export default function App() {
 
             {/* Live API General Error Diagnostics Banner */}
             {error && (
-              <div className="w-full mt-4 p-4 border border-red-500/30 bg-red-950/20 rounded-xl flex gap-3 text-red-400 font-mono text-xs items-start leading-relaxed animate-pulse">
-                <AlertOctagon className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <div className="font-bold uppercase tracking-wider mb-1">System Error Diagnostic</div>
-                  <p className="text-white/80">{error}</p>
+              <div className="w-full mt-4 p-4 border border-red-500/30 bg-red-950/20 rounded-xl flex flex-col gap-3.5 text-red-400 font-mono text-xs">
+                <div className="flex gap-3 items-start leading-relaxed">
+                  <AlertOctagon className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-500 animate-pulse" />
+                  <div className="flex-1">
+                    <div className="font-bold uppercase tracking-wider mb-1">System Error Diagnostic</div>
+                    <p className="text-white/85">{error}</p>
+                    <p className="text-white/40 text-[9px] mt-2 leading-normal lowercase">
+                      // The high-frequency real-time websocket uplink is currently unavailable or rate-limited. Switch communication routes using the standard backup REST interface below.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex justify-end pt-1.5 border-t border-red-500/10">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      playSuccessBeep();
+                      setIsFallbackMode(true);
+                      setHardwareLog(prev => [...prev, `[SYSTEM] Manually rerouted communications to standard REST secure pathway.`]);
+                    }}
+                    className="bg-red-500/10 hover:bg-red-500/25 border border-red-500/30 text-red-400 text-[9px] font-sans font-bold uppercase py-1 px-2.5 rounded transition-all active:scale-95"
+                  >
+                    Activate REST Fallback Uplink
+                  </button>
                 </div>
               </div>
             )}
 
             {/* Big Initializer Uplink Button Overlay */}
             <div className="mt-6 w-full max-w-sm flex flex-col items-center gap-3">
-              <button
-                onClick={toggleConnection}
-                className={`w-full py-3.5 px-6 uppercase tracking-[0.15em] font-sans font-bold flex items-center justify-center gap-3 border transition-all duration-300 relative overflow-hidden group
-                  ${isConnected 
-                    ? 'border-red-500 text-red-400 bg-red-950/10 hover:bg-red-950/30 shadow-[0_0_15px_rgba(239,68,68,0.15)]' 
-                    : 'border-cyan-400 text-black bg-cyan-400 hover:bg-cyan-300 shadow-[0_0_15px_rgba(34,211,238,0.25)]'}`}
-              >
-                <Power className="w-4 h-4" />
-                <span>{isConnected ? 'Disconnect Neurolink' : 'Authorize Core Link'}</span>
-              </button>
-              <p className="text-[10px] font-mono text-center text-white/30 uppercase tracking-widest select-none">
-                {isConnected ? 'Direct link secure // Streaming frame data' : 'Authorizes secure browser microphone/camera websocket'}
+              <div className="flex gap-2 w-full">
+                <button
+                  type="button"
+                  onClick={toggleConnection}
+                  disabled={isFallbackMode}
+                  className={`flex-1 py-3 px-4 uppercase tracking-[0.1em] font-sans font-bold flex items-center justify-center gap-2 border transition-all duration-300 text-[10px] select-none
+                    ${isConnected 
+                      ? 'border-red-500 text-red-400 bg-red-950/10 hover:bg-red-950/30 shadow-[0_0_10px_rgba(239,68,68,0.1)]' 
+                      : isFallbackMode
+                        ? 'border-zinc-800 text-zinc-600 bg-zinc-950 cursor-not-allowed opacity-50'
+                        : 'border-cyan-400 text-black bg-cyan-400 hover:bg-cyan-300 shadow-[0_0_15px_rgba(34,211,238,0.15)]'}`}
+                >
+                  <Power className="w-3.5 h-3.5" />
+                  <span>{isConnected ? 'Disconnect' : 'Connect WebSocket'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    playSuccessBeep();
+                    if (isFallbackMode) {
+                      setIsFallbackMode(false);
+                      setHardwareLog(prev => [...prev, `[SYSTEM] Disabled REST fallback backup interface.`]);
+                    } else {
+                      disconnect();
+                      setIsFallbackMode(true);
+                      setHardwareLog(prev => [...prev, `[SYSTEM] Activated standard REST fallback backup interface. Direct keyboard telemetry active.`]);
+                    }
+                  }}
+                  className={`px-3 py-3 uppercase tracking-[0.1em] font-sans font-bold flex items-center justify-center gap-2 border transition-all duration-300 text-[10px] select-none
+                    ${isFallbackMode 
+                      ? 'border-[#cf59d4] text-[#cf59d4] bg-fuchsia-950/20 hover:bg-fuchsia-950/35 shadow-[0_0_10px_rgba(207,89,212,0.15)]' 
+                      : 'border-white/10 text-white/60 bg-white/[0.01] hover:bg-white/[0.04]'}`}
+                  title="Toggle standard HTTP REST request fallback"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>{isFallbackMode ? 'REST Backup: Active' : 'Reroute REST'}</span>
+                </button>
+              </div>
+
+              <p className="text-[10px] font-mono text-center text-white/30 uppercase tracking-widest select-none leading-relaxed">
+                {isFallbackMode 
+                  ? 'REST Relay ACTIVE // Keyboard input authorized' 
+                  : isConnected 
+                    ? 'Direct link secure // Streaming audio' 
+                    : 'Authorizes secure browser microphone/camera websocket'}
               </p>
             </div>
           </div>
@@ -1086,16 +1220,20 @@ export default function App() {
                 type="text"
                 value={manualInput}
                 onChange={(e) => setManualInput(e.target.value)}
-                placeholder={isConnected ? "Direct command input..." : "Standby. Establish link to engage comms..."}
-                disabled={!isConnected}
+                placeholder={
+                  isConnected || isFallbackMode 
+                    ? (isFallbackQuerying ? "Awaiting neural REST response..." : "Direct command entry...") 
+                    : "Standby. Establish WebSocket link or click Reroute REST..."
+                }
+                disabled={!isConnected && !isFallbackMode}
                 className="flex-1 bg-black/60 border border-white/10 px-4 py-2.5 text-xs text-white placeholder-white/30 focus:outline-none focus:border-cyan-500 disabled:opacity-40"
               />
               <button
                 type="submit"
-                disabled={!isConnected}
+                disabled={(!isConnected && !isFallbackMode) || isFallbackQuerying}
                 className="bg-cyan-950/60 hover:bg-cyan-500 hover:text-black border border-cyan-500/30 text-cyan-400 px-4 text-xs font-bold uppercase transition-all disabled:opacity-40"
               >
-                Send
+                {isFallbackQuerying ? "Querying..." : "Send"}
               </button>
             </form>
           </div>
@@ -1149,74 +1287,89 @@ export default function App() {
 
             {/* Stored Memory List Container */}
             <div className="h-[280px] overflow-y-auto pr-1 space-y-3.5 scrollbar-thin scrollbar-thumb-white/15">
-              {filteredMemories.length === 0 ? (
-                <div className="text-center text-white/30 font-mono h-full flex flex-col items-center justify-center gap-1.5 py-12">
-                  <Brain className="w-7 h-7 opacity-20" />
-                  <p className="text-[10px] uppercase font-bold tracking-wider text-white/40">No active memories matched.</p>
-                </div>
-              ) : (
-                filteredMemories.map((mem) => (
-                  <div 
-                    key={mem.id} 
-                    className="p-3.5 bg-black/30 border border-white/10 rounded-xl flex flex-col gap-3 font-mono transition-all hover:border-cyan-500/20 group"
+              <AnimatePresence mode="popLayout">
+                {filteredMemories.length === 0 ? (
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="text-center text-white/30 font-mono h-full flex flex-col items-center justify-center gap-1.5 py-12"
                   >
-                    {/* Top block stats */}
-                    <div className="flex justify-between items-center text-[8px]">
-                      <div className="flex items-center gap-2">
-                        <span className={`px-2 py-0.5 rounded-full uppercase scale-90 ${
-                          mem.category === 'preference' ? 'bg-emerald-950/80 border border-emerald-500/40 text-emerald-400' :
-                          mem.category === 'fact' ? 'bg-cyan-950/80 border border-cyan-500/40 text-cyan-400' :
-                          'bg-indigo-950/80 border border-indigo-500/40 text-indigo-400'
-                        }`}>
-                          {mem.category}
-                        </span>
-                        <span className="text-white/30 tracking-wider">
-                          {formatTimeAgo(mem.timestamp)}
-                        </span>
-                      </div>
-
-                      {/* Manual forgetting delete controls */}
-                      <button
-                        onClick={() => handleDeleteMemory(mem.id)}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 text-white/30 transition-all rounded hover:bg-red-950/10"
-                        title="Purge Memory block"
-                      >
-                        <Trash2 className="w-3" style={{ height: '12px' }} />
-                      </button>
-                    </div>
-
-                    {/* Memory descriptive content */}
-                    <p className="text-xs leading-relaxed text-white/90">{mem.content}</p>
-
-                    {/* Strength Status & Boost interactive Controls footer */}
-                    <div className="flex items-center justify-between gap-4 pt-2 border-t border-white/5">
-                      <div className="flex-1 flex items-center gap-2">
-                        <span className="text-[8px] text-white/40 uppercase">Strength:</span>
-                        <div className="flex-grow bg-slate-900/60 rounded-full h-1.5 overflow-hidden border border-white/5">
-                          <div 
-                            className={`h-full transition-all duration-500 rounded-full ${
-                              mem.strength > 80 ? 'bg-emerald-500' : mem.strength > 50 ? 'bg-cyan-400' : 'bg-rose-500'
-                            }`}
-                            style={{ width: `${mem.strength}%` }}
-                          />
+                    <Brain className="w-7 h-7 opacity-20" />
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-white/40">No active memories matched.</p>
+                  </motion.div>
+                ) : (
+                  filteredMemories.map((mem) => (
+                    <motion.div 
+                      layout
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                      transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                      key={mem.id} 
+                      className="p-3.5 bg-black/30 border border-white/10 rounded-xl flex flex-col gap-3 font-mono transition-all hover:border-cyan-500/20 group"
+                    >
+                      {/* Top block stats */}
+                      <div className="flex justify-between items-center text-[8px]">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded-full uppercase scale-90 ${
+                            mem.category === 'preference' ? 'bg-emerald-950/80 border border-emerald-500/40 text-emerald-400' :
+                            mem.category === 'fact' ? 'bg-cyan-950/80 border border-cyan-500/40 text-cyan-400' :
+                            'bg-indigo-950/80 border border-indigo-500/40 text-indigo-400'
+                          }`}>
+                            {mem.category}
+                          </span>
+                          <span className="text-white/30 tracking-wider">
+                            {formatTimeAgo(mem.timestamp)}
+                          </span>
                         </div>
-                        <span className="text-[8px] font-bold text-white/60 select-none">{mem.strength}%</span>
+
+                        {/* Manual forgetting delete controls */}
+                        <button
+                          onClick={() => handleDeleteMemory(mem.id)}
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-400 text-white/30 transition-all rounded hover:bg-red-950/10"
+                          title="Purge Memory block"
+                        >
+                          <Trash2 className="w-3" style={{ height: '12px' }} />
+                        </button>
                       </div>
 
-                      {mem.strength < 100 && (
-                        <button
-                          onClick={() => handleBoostMemory(mem.id)}
-                          className="flex items-center gap-1 text-[8px] uppercase tracking-widest font-bold text-fuchsia-400 hover:text-fuchsia-300 hover:bg-fuchsia-950/30 px-1.5 py-0.5 rounded border border-fuchsia-500/20 transition-all"
-                          title="Reinforce neural pathways"
-                        >
-                          <Zap className="w-2.5 h-2.5 animate-pulse" />
-                          BOOST
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
+                      {/* Memory descriptive content */}
+                      <p className="text-xs leading-relaxed text-white/90">{mem.content}</p>
+
+                      {/* Strength Status & Boost interactive Controls footer */}
+                      <div className="flex items-center justify-between gap-4 pt-2 border-t border-white/5">
+                        <div className="flex-1 flex items-center gap-2">
+                          <span className="text-[8px] text-white/40 uppercase">Strength:</span>
+                          <div className="flex-grow bg-slate-900/60 rounded-full h-1.5 overflow-hidden border border-white/5">
+                            <div 
+                              className={`h-full transition-all duration-500 rounded-full ${
+                                mem.strength > 80 ? 'bg-emerald-500' : mem.strength > 50 ? 'bg-cyan-400' : 'bg-rose-500'
+                              }`}
+                              style={{ width: `${mem.strength}%` }}
+                            />
+                          </div>
+                          <span className="text-[8px] font-bold text-white/60 select-none">{mem.strength}%</span>
+                        </div>
+
+                        {mem.strength < 100 && (
+                          <button
+                            onClick={() => {
+                              playSuccessBeep();
+                              handleBoostMemory(mem.id);
+                            }}
+                            className="flex items-center gap-1 text-[8px] uppercase tracking-widest font-bold text-fuchsia-400 hover:text-fuchsia-300 hover:bg-fuchsia-950/30 px-1.5 py-0.5 rounded border border-fuchsia-500/20 transition-all"
+                            title="Reinforce neural pathways"
+                          >
+                            <Zap className="w-2.5 h-2.5 animate-pulse" />
+                            BOOST
+                          </button>
+                        )}
+                      </div>
+                    </motion.div>
+                  ))
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Inline dynamic append Neural Stored block */}
@@ -1365,74 +1518,101 @@ export default function App() {
                 </div>
 
                 <div className="max-h-[220px] overflow-y-auto pr-1 space-y-2.5 scrollbar-thin scrollbar-thumb-white/10">
-                  {osintAlerts.filter(a => a.status !== 'wiped').length === 0 ? (
-                    <div className="text-center py-6 text-white/30 text-[10px] uppercase">
-                      All anomalies cleared & wiped. Grid is fully dark.
-                    </div>
-                  ) : (
-                    osintAlerts
-                      .filter(a => a.status !== 'wiped')
-                      .map((alert) => (
-                        <div 
-                          key={alert.id} 
-                          className={`p-3 border rounded-xl flex flex-col gap-2 transition-all duration-300 ${
-                            alert.status === 'unread' 
-                              ? 'bg-fuchsia-950/15 border-fuchsia-500/35 relative overflow-hidden shadow-[0_0_10px_rgba(217,70,239,0.05)]' 
-                              : 'bg-black/30 border-white/10'
-                          }`}
-                        >
-                          {alert.status === 'unread' && (
-                            <div className="absolute top-0 right-0 w-24 h-[2px] bg-gradient-to-r from-transparent via-fuchsia-500 to-transparent animate-pulse" />
-                          )}
-                          
-                          <div className="flex justify-between items-center text-[8px] uppercase font-bold">
-                            <span className={`px-2 py-0.5 rounded ${
-                              alert.severity === 'critical' ? 'bg-red-950/80 text-red-400 border border-red-500/35 animate-pulse' :
-                              alert.severity === 'high' ? 'bg-amber-950/80 text-amber-400 border border-amber-500/35' :
-                              'bg-zinc-900 text-slate-400 border border-white/10'
-                            }`}>
-                              [{alert.source}] {alert.severity}
-                            </span>
-                            <span className="text-white/30">{formatTimeAgo(alert.timestamp)}</span>
-                          </div>
-
-                          <p className="text-[10px] text-white/85 leading-relaxed font-sans">{alert.message}</p>
-
-                          <div className="flex justify-between items-center pt-2 border-t border-white/5 text-[9px] font-mono">
-                            <span className="text-white/40">Lock: <span className="text-fuchsia-400">{alert.coordinates}</span></span>
-                            <div className="flex gap-1.5">
-                              {alert.status === 'unread' ? (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOsintAlerts(prev => prev.map(a => a.id === alert.id ? { ...a, status: 'acknowledged' } : a));
-                                    setHardwareLog(prev => [...prev, `[OSINT] Acknowledged ${alert.source} spatial intercept.`]);
-                                  }}
-                                  className="text-[8px] uppercase tracking-widest text-[#cf59d4] hover:bg-fuchsia-950/40 px-1.5 py-0.5 rounded border border-fuchsia-500/20"
-                                >
-                                  Ack
-                                </button>
-                              ) : (
-                                <span className="text-emerald-500 text-[8px] flex items-center gap-1">
-                                  <Check className="w-2.5 h-2.5" /> Checked
-                                </span>
-                              )}
-                              <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOsintAlerts(prev => prev.map(a => a.id === alert.id ? { ...a, status: 'wiped' } : a));
-                                    setHardwareLog(prev => [...prev, `[OSINT] Wiped anomaly footprint for index: ${alert.id}`]);
-                                  }}
-                                  className="text-[8px] uppercase text-red-400/70 hover:text-red-400 hover:bg-red-950/20 px-1.5 py-0.5 rounded"
-                                  title="Wipe signal trace"
-                                >
-                                  Wipe
-                                </button>
+                  <AnimatePresence mode="popLayout">
+                    {osintAlerts.filter(a => a.status !== 'wiped').length === 0 ? (
+                      <motion.div 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="text-center py-6 text-white/30 text-[10px] uppercase font-mono"
+                      >
+                        All anomalies cleared & wiped. Grid is fully dark.
+                      </motion.div>
+                    ) : (
+                      osintAlerts
+                        .filter(a => a.status !== 'wiped')
+                        .map((alert) => (
+                          <motion.div 
+                            layout
+                            initial={{ opacity: 0, y: 15 }}
+                            animate={{ 
+                              opacity: 1, 
+                              y: 0,
+                              borderColor: alert.status === 'acknowledged' ? 'rgba(16, 185, 129, 0.25)' : alert.status === 'unread' ? 'rgba(217, 70, 239, 0.35)' : 'rgba(255, 255, 255, 0.1)',
+                              backgroundColor: alert.status === 'acknowledged' ? 'rgba(16, 185, 129, 0.05)' : alert.status === 'unread' ? 'rgba(217, 70, 239, 0.04)' : 'rgba(0, 0, 0, 0.3)'
+                            }}
+                            exit={{ opacity: 0, scale: 0.9, x: -30 }}
+                            transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                            key={alert.id} 
+                            className="p-3 border rounded-xl flex flex-col gap-2 relative overflow-hidden"
+                          >
+                            {alert.status === 'unread' && (
+                              <div className="absolute top-0 right-0 w-24 h-[2px] bg-gradient-to-r from-transparent via-fuchsia-500 to-transparent animate-pulse" />
+                            )}
+                            
+                            <div className="flex justify-between items-center text-[8px] uppercase font-bold">
+                              <span className={`px-2 py-0.5 rounded transition-colors duration-300 ${
+                                alert.status === 'acknowledged' ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/25' :
+                                alert.severity === 'critical' ? 'bg-red-950/80 text-red-400 border border-red-500/35 animate-pulse' :
+                                alert.severity === 'high' ? 'bg-amber-950/80 text-amber-400 border border-amber-500/35' :
+                                'bg-zinc-900 text-slate-400 border border-white/10'
+                              }`}>
+                                [{alert.source}] {alert.status === 'acknowledged' ? 'completed' : alert.severity}
+                              </span>
+                              <span className="text-white/30">{formatTimeAgo(alert.timestamp)}</span>
                             </div>
-                          </div>
-                        </div>
-                      ))
-                  )}
+
+                            <p className={`text-[10px] leading-relaxed font-sans transition-all duration-500 ${
+                              alert.status === 'acknowledged' 
+                                ? 'text-white/40 line-through decoration-emerald-500/30 font-light' 
+                                : 'text-white/85'
+                            }`}>
+                              {alert.message}
+                            </p>
+
+                            <div className="flex justify-between items-center pt-2 border-t border-white/5 text-[9px] font-mono">
+                              <span className="text-white/40 block overflow-hidden truncate max-w-[140px] md:max-w-none">Lock: <span className="text-fuchsia-400">{alert.coordinates}</span></span>
+                              <div className="flex gap-1.5 shrink-0">
+                                {alert.status === 'unread' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      playSuccessBeep();
+                                      setOsintAlerts(prev => prev.map(a => a.id === alert.id ? { ...a, status: 'acknowledged' } : a));
+                                      setHardwareLog(prev => [...prev, `[OSINT] Acknowledged ${alert.source} spatial intercept.`]);
+                                    }}
+                                    className="text-[8px] uppercase tracking-widest text-[#cf59d4] hover:bg-fuchsia-950/40 px-1.5 py-0.5 rounded border border-fuchsia-500/20 active:scale-95 transition-transform"
+                                  >
+                                    Ack
+                                  </button>
+                                ) : (
+                                  <motion.span 
+                                    initial={{ scale: 0, rotate: -20 }}
+                                    animate={{ scale: 1, rotate: 0 }}
+                                    transition={{ type: 'spring', stiffness: 300, damping: 12 }}
+                                    className="text-emerald-400 text-[8px] flex items-center gap-1 font-bold bg-emerald-950/30 border border-emerald-500/20 px-1.5 py-0.5 rounded"
+                                  >
+                                    <Check className="w-2.5 h-2.5 text-emerald-400" /> Checked
+                                  </motion.span>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                      playAlertBeep();
+                                      setOsintAlerts(prev => prev.map(a => a.id === alert.id ? { ...a, status: 'wiped' } : a));
+                                      setHardwareLog(prev => [...prev, `[OSINT] Wiped anomaly footprint for index: ${alert.id}`]);
+                                    }}
+                                    className="text-[8px] uppercase text-red-400/70 hover:text-red-400 hover:bg-red-950/20 px-1.5 py-0.5 rounded active:scale-95 transition-transform"
+                                    title="Wipe signal trace"
+                                  >
+                                    Wipe
+                                  </button>
+                              </div>
+                            </div>
+                          </motion.div>
+                        ))
+                    )}
+                  </AnimatePresence>
                 </div>
               </div>
             ) : (

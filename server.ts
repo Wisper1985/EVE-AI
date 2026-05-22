@@ -88,6 +88,59 @@ async function startServer() {
     }
   });
 
+  // REST Proxy Fallback for conversational EVE/SyX commands when the Live WebSocket stream is unavailable
+  app.post("/api/chat", async (req, res) => {
+    try {
+      const { message, history = [], systemInstruction } = req.body;
+      
+      if (!message) {
+        return res.status(400).json({ error: "Message content is required." });
+      }
+
+      if (!ai) {
+        return res.status(500).json({ 
+          error: "Gemini API key is not configured on the server environment. Please attach a valid API key through Settings." 
+        });
+      }
+
+      console.log(`[AI-Chat] Handshaking secure REST fallback proxy for message: "${message}"`);
+
+      // Map raw history elements cleanly to Gemini Content schemas, keeping only the final 15 exchanges for throughput speed
+      const recentHistory = history.slice(-15);
+      const contents = recentHistory.map((h: any) => ({
+        role: h.role === 'user' ? 'user' : 'model',
+        parts: [{ text: h.text }]
+      }));
+
+      // Append active operator query
+      contents.push({
+        role: 'user',
+        parts: [{ text: message }]
+      });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents,
+        config: {
+          systemInstruction: systemInstruction || "You are SyX, a highly advanced artificial intelligence companion core.",
+          temperature: 0.7,
+        }
+      });
+
+      const text = response.text || "Connection verified. Command parameters received and acknowledged.";
+      
+      return res.json({
+        success: true,
+        text: text
+      });
+    } catch (error: any) {
+      console.error("[AI-Chat-Error] Fallback REST chat proxy failed:", error);
+      return res.status(500).json({ 
+        error: error?.message || "An exception occurred in the conversational REST relay." 
+      });
+    }
+  });
+
   // Physical ESP servo hardware adapter bridge command route
   app.post("/api/hardware/claw", (req, res) => {
     const { command } = req.body;
